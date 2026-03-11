@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { RecorderStatus } from "./record-page-state";
 import RecordPage from "./page";
 
@@ -28,7 +29,19 @@ jest.mock("@/lib/audio/use-audio-engine", () => ({
   useAudioEngine: () => audioEngineState,
 }));
 
+const mockUploadClip = jest.fn();
+jest.mock("@/lib/clips/api", () => ({
+  uploadClip: (...args: unknown[]) => mockUploadClip(...args),
+}));
+
 describe("RecordPage", () => {
+  function setRecorded() {
+    recorderState.status = "recorded";
+    recorderState.durationMs = 3_000;
+    recorderState.blobUrl = "blob:preview";
+    recorderState.blob = new Blob(["audio"], { type: "audio/webm" });
+  }
+
   beforeEach(() => {
     jest.clearAllMocks();
     recorderState.status = "idle";
@@ -37,6 +50,7 @@ describe("RecordPage", () => {
     recorderState.blob = null;
     recorderState.error = null;
     audioEngineState.isPlaying = false;
+    mockUploadClip.mockReset();
   });
 
   it("shows an awaiting permission badge while microphone access is pending", () => {
@@ -52,10 +66,7 @@ describe("RecordPage", () => {
   });
 
   it("shows previewing state and recorded sections while preview is active", () => {
-    recorderState.status = "recorded";
-    recorderState.durationMs = 3_000;
-    recorderState.blobUrl = "blob:preview";
-    recorderState.blob = new Blob(["audio"], { type: "audio/webm" });
+    setRecorded();
     audioEngineState.isPlaying = true;
 
     render(<RecordPage />);
@@ -64,5 +75,59 @@ describe("RecordPage", () => {
     expect(screen.getByLabelText("Filter controls")).toBeInTheDocument();
     expect(screen.getByLabelText("Playback controls")).toBeInTheDocument();
     expect(screen.getByText("Stop Preview")).toBeInTheDocument();
+  });
+
+  it("shows Save Clip button in recorded state", () => {
+    setRecorded();
+    render(<RecordPage />);
+    expect(screen.getByText("Save Clip")).toBeInTheDocument();
+  });
+
+  it("shows loading state while uploading", async () => {
+    setRecorded();
+    // Never resolves during the test
+    mockUploadClip.mockReturnValue(new Promise(() => {}));
+    render(<RecordPage />);
+
+    await userEvent.click(screen.getByText("Save Clip"));
+
+    expect(screen.getByText("Saving…")).toBeInTheDocument();
+    expect(screen.getByText("Saving…")).toBeDisabled();
+  });
+
+  it("shows success message and link after upload", async () => {
+    setRecorded();
+    mockUploadClip.mockResolvedValue({ id: "abc-123" });
+    render(<RecordPage />);
+
+    await userEvent.click(screen.getByText("Save Clip"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Clip saved!")).toBeInTheDocument();
+    });
+    const link = screen.getByText("View clip");
+    expect(link).toHaveAttribute("href", "/clips/abc-123");
+  });
+
+  it("shows error and retry on upload failure", async () => {
+    setRecorded();
+    mockUploadClip
+      .mockRejectedValueOnce(new Error("Network error"))
+      .mockResolvedValueOnce({ id: "retry-123" });
+    render(<RecordPage />);
+
+    await userEvent.click(screen.getByText("Save Clip"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Network error")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Playback controls")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Clip saved!")).toBeInTheDocument();
+    });
   });
 });
