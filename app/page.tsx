@@ -1,6 +1,7 @@
 "use client";
 
 import { useReducer, useCallback, useEffect } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useRecorder } from "@/lib/audio/useRecorder";
@@ -8,6 +9,7 @@ import { useAudioEngine } from "@/lib/audio/use-audio-engine";
 import { type FilterType } from "@/lib/audio/filter-registry";
 import { FilterPanel } from "@/components/filters/filter-panel";
 import { SignalChain } from "@/components/filters/signal-chain";
+import { uploadClip } from "@/lib/clips/api";
 import { initialPageState, pageReducer } from "./record-page-state";
 
 function formatDuration(ms: number): string {
@@ -61,6 +63,20 @@ export default function RecordPage() {
     await preview(blob, state.filters);
   }, [blob, state.filters, preview]);
 
+  const handleSave = useCallback(async () => {
+    if (!blob) return;
+    dispatch({ type: "UPLOAD_START" });
+    try {
+      const clip = await uploadClip(blob, durationMs, state.filters);
+      dispatch({ type: "UPLOAD_SUCCESS", clipId: clip.id });
+    } catch (err) {
+      dispatch({
+        type: "UPLOAD_ERROR",
+        error: err instanceof Error ? err.message : "Upload failed",
+      });
+    }
+  }, [blob, durationMs, state.filters]);
+
   const handleReset = useCallback(() => {
     stop();
     dispatch({ type: "RESET_PAGE" });
@@ -76,11 +92,18 @@ export default function RecordPage() {
     recording: { label: "Recording", variant: "destructive" as const },
     recorded: { label: "Recorded", variant: "secondary" as const },
     previewing: { label: "Previewing", variant: "default" as const },
+    uploading: { label: "Saving", variant: "secondary" as const },
+    uploaded: { label: "Saved", variant: "default" as const },
     error: { label: "Error", variant: "destructive" as const },
   }[state.status];
 
   const hasCapturedAudio =
-    (state.status === "recorded" || state.status === "previewing") && blobUrl;
+    (state.status === "recorded" ||
+      state.status === "previewing" ||
+      state.status === "uploading" ||
+      state.status === "uploaded" ||
+      (state.status === "error" && Boolean(blobUrl))) &&
+    blobUrl;
 
   return (
     <div className="space-y-6">
@@ -110,7 +133,7 @@ export default function RecordPage() {
           {state.status === "idle" && (
             <button
               onClick={startRecording}
-              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              className="rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:opacity-90"
             >
               Record
             </button>
@@ -126,12 +149,12 @@ export default function RecordPage() {
             <div className="flex items-center gap-4">
               <button
                 onClick={stopRecording}
-                className="rounded-md bg-zinc-800 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+                className="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:opacity-90"
               >
                 Stop
               </button>
               <div className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-destructive" />
                 <span className="font-mono text-sm text-foreground">
                   {formatDuration(durationMs)}
                 </span>
@@ -160,18 +183,33 @@ export default function RecordPage() {
                   {isPlaying ? (
                     <button
                       onClick={stop}
-                      className="rounded-md bg-zinc-800 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+                      className="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:opacity-90"
                     >
                       Stop Preview
                     </button>
                   ) : (
                     <button
                       onClick={handlePreview}
-                      className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                      className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
                     >
                       Preview
                     </button>
                   )}
+                  {state.status === "uploading" ? (
+                    <button
+                      disabled
+                      className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground opacity-60"
+                    >
+                      Saving…
+                    </button>
+                  ) : state.status !== "uploaded" ? (
+                    <button
+                      onClick={handleSave}
+                      className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+                    >
+                      Save Clip
+                    </button>
+                  ) : null}
                   <button
                     onClick={handleReset}
                     className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
@@ -180,6 +218,18 @@ export default function RecordPage() {
                   </button>
                 </div>
 
+                {state.status === "uploaded" && state.clipId && (
+                  <p className="text-sm text-primary">
+                    Clip saved!{" "}
+                    <Link
+                      href={`/clips/${state.clipId}`}
+                      className="underline hover:opacity-80"
+                    >
+                      View clip
+                    </Link>
+                  </p>
+                )}
+
                 <audio controls src={blobUrl} className="w-full" />
               </section>
             </div>
@@ -187,13 +237,23 @@ export default function RecordPage() {
 
           {state.status === "error" && (
             <div className="space-y-3">
-              <p className="text-sm text-red-500">{state.error}</p>
-              <button
-                onClick={handleReset}
-                className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
-              >
-                Try again
-              </button>
+              <p className="text-sm text-destructive">{state.error}</p>
+              <div className="flex items-center gap-2">
+                {blob && (
+                  <button
+                    onClick={handleSave}
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+                  >
+                    Retry
+                  </button>
+                )}
+                <button
+                  onClick={handleReset}
+                  className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
+                >
+                  Try again
+                </button>
+              </div>
             </div>
           )}
         </CardContent>
