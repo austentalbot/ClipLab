@@ -4,6 +4,7 @@ import {
   useReducer,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
 } from "react";
@@ -40,6 +41,7 @@ export default function RecordPage() {
 
   const [state, dispatch] = useReducer(pageReducer, initialPageState);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const isSavingRef = useRef(false);
 
   useEffect(() => {
     dispatch({
@@ -70,7 +72,8 @@ export default function RecordPage() {
   );
 
   const handleSave = useCallback(async () => {
-    if (!blob || state.status === "uploading") return;
+    if (!blob || state.status === "uploading" || isSavingRef.current) return;
+    isSavingRef.current = true;
     const nextTitle = state.title.trim() || createClipTitle(new Date());
     dispatch({ type: "UPLOAD_START" });
     try {
@@ -81,6 +84,8 @@ export default function RecordPage() {
         type: "UPLOAD_ERROR",
         error: err instanceof Error ? err.message : "Upload failed",
       });
+    } finally {
+      isSavingRef.current = false;
     }
   }, [blob, durationMs, router, state.filters, state.status, state.title]);
 

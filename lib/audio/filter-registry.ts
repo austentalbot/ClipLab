@@ -8,6 +8,11 @@ export type FilterConfig = {
   params: Record<string, number>;
 };
 
+export type FilterNodeResult = {
+  node: AudioNode;
+  dispose?: () => void;
+};
+
 export type FilterDef = {
   type: FilterType;
   label: string;
@@ -27,7 +32,7 @@ export type FilterDef = {
   createNode: (
     ctx: BaseAudioContext,
     params: Record<string, number>
-  ) => AudioNode;
+  ) => FilterNodeResult;
 };
 
 // ── Registry ───────────────────────────────────────────────────
@@ -52,7 +57,7 @@ export const filterRegistry: FilterDef[] = [
     createNode(ctx, params) {
       const node = ctx.createGain();
       node.gain.value = params.gain;
-      return node;
+      return { node };
     },
   },
   {
@@ -85,7 +90,7 @@ export const filterRegistry: FilterDef[] = [
       node.type = "lowpass";
       node.frequency.value = params.frequency;
       node.Q.value = params.Q;
-      return node;
+      return { node };
     },
   },
   {
@@ -117,7 +122,7 @@ export const filterRegistry: FilterDef[] = [
       node.type = "highpass";
       node.frequency.value = params.frequency;
       node.Q.value = params.Q;
-      return node;
+      return { node };
     },
   },
   {
@@ -146,7 +151,12 @@ export const filterRegistry: FilterDef[] = [
       delay.connect(feedback);
       feedback.connect(delay);
 
-      return delay;
+      return {
+        node: delay,
+        dispose() {
+          feedback.disconnect();
+        },
+      };
     },
   },
 ];

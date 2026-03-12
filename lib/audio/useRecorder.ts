@@ -158,6 +158,7 @@ export function useRecorder() {
       };
 
       recorder.onerror = () => {
+        chunksRef.current = [];
         stopTimer();
         stopTracks();
         isStartingRef.current = false;
