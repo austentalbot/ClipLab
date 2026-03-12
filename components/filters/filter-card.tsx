@@ -4,7 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
-import { formatParamValue } from "@/lib/format";
+import { formatParamValue } from "@/lib/clips/format";
 import type {
   FilterDef,
   FilterConfig,

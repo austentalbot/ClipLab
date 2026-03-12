@@ -9,11 +9,11 @@ jest.mock("crypto", () => ({
 }));
 
 const mockAddClip = jest.fn();
-const mockListClips = jest.fn();
+const mockReadClips = jest.fn();
 
 jest.mock("@/lib/clips/store", () => ({
   addClip: (...args: unknown[]) => mockAddClip(...args),
-  listClips: (...args: unknown[]) => mockListClips(...args),
+  readClips: (...args: unknown[]) => mockReadClips(...args),
 }));
 
 const mockMkdir = jest.fn();
@@ -33,7 +33,7 @@ describe("/api/clips route", () => {
     mockRm.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
     mockAddClip.mockResolvedValue(undefined);
-    mockListClips.mockResolvedValue([]);
+    mockReadClips.mockResolvedValue([]);
   });
 
   it("returns 400 for malformed filters metadata", async () => {
@@ -83,7 +83,7 @@ describe("/api/clips route", () => {
   });
 
   it("returns clips from GET", async () => {
-    mockListClips.mockResolvedValue([
+    mockReadClips.mockResolvedValue([
       {
         id: "clip-2",
         title: "Second clip",

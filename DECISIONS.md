@@ -34,17 +34,19 @@ Live monitoring would require routing the microphone through Web Audio during re
 
 ## 4. Fixed Filter Order in Signal Chain
 
-**What:** Filters are always applied in registry order: gain → low-pass → high-pass → delay.
+**What:** Filters are always applied in registry order: gain → low-pass → high-pass → compressor → delay.
 
-**Why:** Filter ordering changes signal semantics, not just the UI sequence. Gain before low-pass means the filter sees the boosted signal; low-pass before gain means you're boosting the already-filtered signal. The fixed order follows common audio processing conventions (level adjustment first, frequency shaping second, time-based effects last) and gives a predictable result that's easier to reason about.
+**Why:** Filter ordering changes signal semantics, not just the UI sequence. Gain before low-pass means the filter sees the boosted signal; low-pass before gain means you're boosting the already-filtered signal. The fixed order follows common audio processing conventions (level adjustment first, frequency shaping second, dynamics processing third, time-based effects last) and gives a predictable result that's easier to reason about.
 
-**Alternatives:** Drag-and-drop reordering would give users more creative control, but adds significant UI complexity (drag state, reorder animations, order persistence) and requires users to understand signal flow to get good results. With four filters, the fixed order covers the sensible default.
+**Alternatives:** Drag-and-drop reordering would give users more creative control, but adds significant UI complexity (drag state, reorder animations, order persistence) and requires users to understand signal flow to get good results. With five filters, the fixed order covers the sensible default.
 
 ## 5. Filesystem + JSON Persistence
 
 **What:** Audio files are stored in `public/uploads/` and metadata in `data/clips.json`.
 
 **Why:** Zero setup for reviewers — `npm install && npm run dev` is all that's needed. The JSON file is human-inspectable (easy to verify data integrity during review), and the data model is simple enough that a flat file handles it well. The tradeoff is accepting the lack of transactional guarantees and concurrent write safety, which is reasonable for a single-user demo.
+
+**Deployment note:** Filesystem persistence does not work on serverless platforms like Vercel, where the filesystem is ephemeral and read-only at runtime. A database or object storage backend would be required for deployment beyond local development.
 
 **Alternatives:** SQLite would add query capabilities and atomic writes but requires a native dependency. PostgreSQL would be appropriate for production multi-user scenarios but is overkill here and adds setup friction.
 
@@ -64,13 +66,13 @@ Live monitoring would require routing the microphone through Web Audio during re
 
 **Alternatives:** Multiple boolean flags (`isRecording`, `isUploading`, `hasError`, etc.) — prone to impossible state combinations like `isRecording && isUploading`, and each new feature adds another flag that interacts with all existing flags.
 
-## 8. Lazy AudioContext Creation
+## 8. AudioContext Creation and Resume
 
-**What:** `AudioContext` is created on first user interaction (first preview or playback), not at component mount.
+**What:** `AudioContext` instances are created eagerly when audio state appears (e.g., when filter state changes or a clip's waveform loads), but playback requires a user gesture to resume the context from its initial `suspended` state.
 
-**Why:** Browsers block `AudioContext` playback until a user gesture has occurred. Creating the context eagerly at mount produces a suspended context that may not resume reliably. Creating it lazily inside the first play/preview action guarantees the gesture requirement is satisfied, and avoids allocating audio resources for users who navigate away without ever playing audio.
+**Why:** The Web Audio API requires routing through an `AudioContext` for filtered playback, and browsers start every context in a `suspended` state until a user gesture occurs. The player creates the context and graph when filters are enabled so the chain is ready before the user presses play, then calls `resume()` inside the `play` event handler where the gesture requirement is satisfied. Waveform decoding also creates a short-lived context for `decodeAudioData`, which is closed immediately after decoding completes.
 
-**Alternatives:** Creating at mount and calling `resume()` on first interaction. This works but leaves a suspended context sitting in memory and adds another state to manage (context exists but isn't usable yet).
+**Alternatives:** Deferring context creation until the first play gesture would avoid allocating resources for users who never press play, but would add a loading delay on first playback while the graph is built. The eager approach keeps playback instant at the cost of an `AudioContext` allocation that is cleaned up on unmount.
 
 ## 9. Shared MediaElement Playback
 
@@ -79,3 +81,31 @@ Live monitoring would require routing the microphone through Web Audio during re
 **Why:** This keeps the MVP simpler and more consistent. The same playback component works for in-memory blob URLs on the record page and persisted files on the detail page, while the browser handles play/pause/seek UI natively. That means there is one playback path to reason about, one set of playback lifecycle issues to manage, and no need to build custom transport controls.
 
 **Alternatives:** A buffer-based playback path would give tighter control over decoded audio and could support reuse across filter updates, but for this MVP it adds a second playback model without enough user-facing benefit. Sticking to the shared `MediaElement` path is the more reasonable choice here.
+
+## 10. Waveform Shows Raw Audio, Not Filtered
+
+**What:** The waveform visualization shows peaks extracted from the raw (unprocessed) audio buffer. It displays a synced playhead via `timeupdate` but does not reflect applied filters, and does not support click-to-seek — the native `<audio>` element remains the sole transport control.
+
+**Why:** Showing a filtered waveform would require rendering the audio through an `OfflineAudioContext` with the full filter chain every time filter parameters change. That's expensive, introduces visible latency on parameter adjustments, and adds significant complexity for a visual that users don't interact with. The waveform's purpose is to show the recording's shape and the current playback position — both are properties of the raw audio, not the filter chain.
+
+An interactive (click-to-seek) waveform would require building custom transport controls and bidirectional sync between the waveform and the audio element, duplicating logic the browser already handles natively.
+
+**Alternatives:** `OfflineAudioContext` rendering would produce an accurate filtered waveform but at the cost of per-change re-renders and a loading state while processing. A real-time `AnalyserNode` tapped into the playback graph would only work during active playback, not as a static preview.
+
+## 11. Delay Tail Handling via Lifecycle Callbacks
+
+**What:** `FilterNodeResult` supports optional `onStop` and `onPlay` callbacks. The delay filter zeros its feedback gain on stop and restores it on play, silencing the echo tail immediately when playback pauses.
+
+**Why:** This keeps lifecycle logic co-located with the filter definition rather than leaking delay internals into the player. The player just calls the callbacks without knowing which filter needs them or why.
+
+**Alternatives:** The player could special-case delay behavior, but that breaks the registry abstraction. Another option is disconnecting and reconnecting the delay node, but that would cause audible clicks and require rebuilding part of the graph.
+
+## 12. Live Parameter Updates During Playback
+
+**What:** When a user adjusts a filter slider during playback, the change is applied by setting `AudioParam.value` directly on the existing Web Audio nodes. The audio graph is only rebuilt when the set of enabled filters changes (e.g., toggling a filter on or off).
+
+**Why:** Changing a slider like gain or cutoff does not require a new playback graph. The app already has the right node; it just needs to update that node's parameter. Doing this in place keeps playback continuous. Rebuilding the whole graph on every slider movement would tear down the current chain, create a new one, and cause a brief audible interruption.
+
+The graph is only rebuilt when its structure changes, which in this app means the set of enabled filters changed. Plain parameter updates are handled separately through an `update` callback on each filter result. That callback lives next to `createNode` in the registry, so each filter owns both how it is created and how its live parameters are updated. The player does not need filter-specific logic; it just calls `result.update(params)`.
+
+**Alternatives:** The simplest alternative is to rebuild the entire audio graph on every filter change, including slider updates. That would reduce the amount of filter-specific update logic, but it produces audible gaps during playback and makes parameter changes feel less responsive. Given the small number of supported filters, in-place updates are the better tradeoff here.

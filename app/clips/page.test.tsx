@@ -33,6 +33,11 @@ const makeClip = (overrides: Partial<Clip> = {}): Clip => ({
     { type: "gain", enabled: true, params: { gain: 1.5 } },
     { type: "lowpass", enabled: false, params: { frequency: 1000, Q: 1 } },
     { type: "highpass", enabled: false, params: { frequency: 500, Q: 1 } },
+    {
+      type: "compressor",
+      enabled: false,
+      params: { threshold: -24, ratio: 4 },
+    },
     { type: "delay", enabled: false, params: { time: 0.3 } },
   ],
   ...overrides,

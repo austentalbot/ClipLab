@@ -11,20 +11,25 @@ import {
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { WaveformDisplay } from "@/components/audio/waveform-display";
 import { FilteredAudioPlayer } from "@/components/clips/filtered-audio-player";
 import { useRecorder } from "@/lib/audio/useRecorder";
+import { useWaveform } from "@/lib/audio/useWaveform";
 import { type FilterType } from "@/lib/audio/filter-registry";
 import { FilterPanel } from "@/components/filters/filter-panel";
 import { uploadClip } from "@/lib/clips/api";
-import { createClipTitle } from "@/lib/clips/format";
+import { createClipTitle, formatClipDuration } from "@/lib/clips/format";
 import { initialPageState, pageReducer } from "./record-page-state";
 
-function formatDuration(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  return `${min}:${sec.toString().padStart(2, "0")}`;
-}
+const STATUS_BADGES = {
+  idle: { label: "Ready", variant: "outline" as const },
+  "requesting-permission": { label: "Allow mic", variant: "outline" as const },
+  recording: { label: "Recording", variant: "recording" as const },
+  recorded: { label: "Recorded", variant: "secondary" as const },
+  previewing: { label: "Previewing", variant: "default" as const },
+  uploading: { label: "Saving clip", variant: "secondary" as const },
+  error: { label: "Error", variant: "destructive" as const },
+};
 
 export default function RecordPage() {
   const router = useRouter();
@@ -41,6 +46,12 @@ export default function RecordPage() {
 
   const [state, dispatch] = useReducer(pageReducer, initialPageState);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const {
+    audioBuffer,
+    progress: waveformProgress,
+    handleTimeUpdate,
+    resetWaveform,
+  } = useWaveform(blob);
   const isSavingRef = useRef(false);
 
   useEffect(() => {
@@ -93,7 +104,8 @@ export default function RecordPage() {
     dispatch({ type: "RESET_PAGE" });
     reset();
     setIsPreviewing(false);
-  }, [reset]);
+    resetWaveform();
+  }, [reset, resetWaveform]);
 
   const handleTitleChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -102,18 +114,7 @@ export default function RecordPage() {
     []
   );
 
-  const statusBadge = {
-    idle: { label: "Ready", variant: "outline" as const },
-    "requesting-permission": {
-      label: "Allow mic",
-      variant: "outline" as const,
-    },
-    recording: { label: "Recording", variant: "destructive" as const },
-    recorded: { label: "Recorded", variant: "secondary" as const },
-    previewing: { label: "Previewing", variant: "default" as const },
-    uploading: { label: "Saving clip", variant: "secondary" as const },
-    error: { label: "Error", variant: "destructive" as const },
-  }[state.status];
+  const statusBadge = STATUS_BADGES[state.status];
   const activeFiltersCount = state.filters.filter(
     (filter) => filter.enabled
   ).length;
@@ -141,7 +142,7 @@ export default function RecordPage() {
           {state.status === "idle" && (
             <button
               onClick={startRecording}
-              className="rounded-md bg-destructive px-5 py-2.5 text-sm font-medium text-destructive-foreground hover:opacity-90"
+              className="rounded-md bg-recording px-5 py-2.5 text-sm font-medium text-recording-foreground hover:opacity-90"
             >
               Start recording
             </button>
@@ -156,7 +157,7 @@ export default function RecordPage() {
           {state.status === "recording" && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-destructive" />
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-recording" />
                 <span>Recording now</span>
               </div>
               <div className="flex flex-wrap items-center gap-4">
@@ -167,7 +168,7 @@ export default function RecordPage() {
                   Stop recording
                 </button>
                 <span className="font-mono text-sm text-foreground">
-                  {formatDuration(durationMs)}
+                  {formatClipDuration(durationMs)}
                 </span>
               </div>
             </div>
@@ -195,7 +196,7 @@ export default function RecordPage() {
 
               <section className="space-y-4 rounded-3xl border border-border bg-muted/30 p-4">
                 <p className="text-sm text-muted-foreground">
-                  {formatDuration(durationMs)} ·{" "}
+                  {formatClipDuration(durationMs)} ·{" "}
                   {activeFiltersCount === 0
                     ? "No filters on"
                     : `${activeFiltersCount} filter${
@@ -203,13 +204,20 @@ export default function RecordPage() {
                       } on`}
                 </p>
 
-                <FilteredAudioPlayer
-                  ariaLabel="Clip preview"
-                  disabled={isSaving}
-                  filters={state.filters}
-                  onPlaybackChange={setIsPreviewing}
-                  src={blobUrl}
-                />
+                <div className="space-y-2">
+                  <WaveformDisplay
+                    audioBuffer={audioBuffer}
+                    progress={waveformProgress}
+                  />
+                  <FilteredAudioPlayer
+                    ariaLabel="Clip preview"
+                    disabled={isSaving}
+                    filters={state.filters}
+                    onPlaybackChange={setIsPreviewing}
+                    onTimeUpdate={handleTimeUpdate}
+                    src={blobUrl}
+                  />
+                </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   {state.status === "uploading" ? (
@@ -255,7 +263,9 @@ export default function RecordPage() {
 
           {state.status === "error" && !hasCapturedAudio && (
             <div className="space-y-3">
-              <p className="text-sm text-destructive">{state.error}</p>
+              <p className="text-sm text-destructive">
+                {state.error ?? "Something went wrong."}
+              </p>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleReset}

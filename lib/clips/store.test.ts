@@ -1,4 +1,4 @@
-import { readClips, writeClips, addClip, getClip, listClips } from "./store";
+import { readClips, writeClips, addClip, getClip } from "./store";
 import type { Clip } from "./types";
 
 jest.mock("fs/promises", () => {
@@ -77,14 +77,14 @@ describe("clip store", () => {
     expect(clips[1].id).toBe("clip-1");
   });
 
-  it("listClips returns clips sorted by createdAt desc", async () => {
+  it("readClips returns clips sorted by createdAt desc", async () => {
     await writeClips([
       makeClip({ id: "oldest", createdAt: "2025-01-01T00:00:00.000Z" }),
       makeClip({ id: "newest", createdAt: "2025-03-01T00:00:00.000Z" }),
       makeClip({ id: "middle", createdAt: "2025-02-01T00:00:00.000Z" }),
     ]);
 
-    const clips = await listClips();
+    const clips = await readClips();
     expect(clips.map((clip) => clip.id)).toEqual([
       "newest",
       "middle",

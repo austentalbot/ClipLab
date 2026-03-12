@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { mkdir, rm, writeFile } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
-import { addClip, listClips } from "@/lib/clips/store";
+import { addClip, readClips } from "@/lib/clips/store";
 import type { Clip } from "@/lib/clips/types";
 import {
   type FilterConfig,
@@ -34,7 +34,7 @@ function validateFilters(filters: unknown[]): filters is FilterConfig[] {
 
 export async function GET() {
   try {
-    const clips = await listClips();
+    const clips = await readClips();
     return NextResponse.json(clips);
   } catch {
     return NextResponse.json(

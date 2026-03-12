@@ -28,10 +28,6 @@ export function getClipFileUrl(filename: string): string {
   return `/uploads/${encodeURIComponent(filename)}`;
 }
 
-export async function listClips(): Promise<Clip[]> {
-  return readClips();
-}
-
 export async function getClip(id: string): Promise<Clip | null> {
   const clips = await readClips();
   return clips.find((c) => c.id === id) ?? null;

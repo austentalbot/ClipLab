@@ -47,6 +47,24 @@ describe("RecordPage", () => {
     mockUploadClip.mockReset();
   });
 
+  it("shows error message and retry button when mic permission is denied", async () => {
+    recorderState.status = "error";
+    recorderState.error = "Microphone permission was denied.";
+
+    render(<RecordPage />);
+
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(
+      screen.getByText("Microphone permission was denied.")
+    ).toBeInTheDocument();
+
+    const tryAgainButton = screen.getByText("Try again");
+    expect(tryAgainButton).toBeInTheDocument();
+
+    await userEvent.click(tryAgainButton);
+    expect(recorderState.reset).toHaveBeenCalled();
+  });
+
   it("shows an awaiting permission badge while microphone access is pending", () => {
     recorderState.status = "requesting-permission";
 

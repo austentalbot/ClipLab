@@ -22,6 +22,13 @@ export function createClipTitle(date: Date | string): string {
   }).format(new Date(date))}`;
 }
 
+export function formatParamValue(value: number, unit?: string): string {
+  const formatted = Number.isInteger(value)
+    ? value.toString()
+    : value.toFixed(2);
+  return unit ? `${formatted}${unit}` : formatted;
+}
+
 export function formatRelativeTime(isoDate: string): string {
   const now = Date.now();
   const then = new Date(isoDate).getTime();
