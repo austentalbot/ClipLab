@@ -125,6 +125,63 @@ describe("/api/clips route", () => {
     expect(response.status).toBe(200);
   });
 
+  it("returns 400 for filter with unknown type", async () => {
+    const formData = new FormData();
+    formData.append("file", new Blob(["audio"], { type: "audio/webm" }));
+    formData.append("title", "My clip");
+    formData.append("durationMs", "3000");
+    formData.append(
+      "filters",
+      JSON.stringify([{ type: "reverb", enabled: true, params: { mix: 0.5 } }])
+    );
+
+    const request = { formData: async () => formData } as Request;
+    const response = await POST(request);
+
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid filters payload",
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 400 for filter with non-boolean enabled", async () => {
+    const formData = new FormData();
+    formData.append("file", new Blob(["audio"], { type: "audio/webm" }));
+    formData.append("title", "My clip");
+    formData.append("durationMs", "3000");
+    formData.append(
+      "filters",
+      JSON.stringify([{ type: "gain", enabled: "yes", params: { gain: 1 } }])
+    );
+
+    const request = { formData: async () => formData } as Request;
+    const response = await POST(request);
+
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid filters payload",
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 400 for filter with missing params", async () => {
+    const formData = new FormData();
+    formData.append("file", new Blob(["audio"], { type: "audio/webm" }));
+    formData.append("title", "My clip");
+    formData.append("durationMs", "3000");
+    formData.append(
+      "filters",
+      JSON.stringify([{ type: "gain", enabled: true, params: {} }])
+    );
+
+    const request = { formData: async () => formData } as Request;
+    const response = await POST(request);
+
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid filters payload",
+    });
+    expect(response.status).toBe(400);
+  });
+
   it("returns 400 when title is missing", async () => {
     const formData = new FormData();
     formData.append("file", new Blob(["audio"], { type: "audio/webm" }));

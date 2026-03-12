@@ -32,6 +32,7 @@ export function FilteredAudioPlayer({
   const ctxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const nodesRef = useRef<AudioNode[]>([]);
+  const disposersRef = useRef<(() => void)[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const enabledFilters = useMemo(
@@ -72,17 +73,24 @@ export function FilteredAudioPlayer({
     };
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => setIsPlaying(false);
+    const handleError = () => setError("Audio file could not be loaded");
 
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
     audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
 
     return () => {
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
     };
   }, []);
+
+  useEffect(() => {
+    setError(null);
+  }, [src]);
 
   useEffect(() => {
     if (!disabled) return;
@@ -105,6 +113,8 @@ export function FilteredAudioPlayer({
     }
     nodesRef.current.forEach((node) => node.disconnect());
     nodesRef.current = [];
+    disposersRef.current.forEach((dispose) => dispose());
+    disposersRef.current = [];
     setError(null);
 
     if (enabledFilters.length === 0) {
@@ -139,9 +149,12 @@ export function FilteredAudioPlayer({
       for (const filter of enabledFilters) {
         const def = filterRegistry.find((item) => item.type === filter.type);
         if (!def) continue;
-        const node = def.createNode(entry.ctx, filter.params);
-        chain.push(node);
-        nodesRef.current.push(node);
+        const result = def.createNode(entry.ctx, filter.params);
+        chain.push(result.node);
+        nodesRef.current.push(result.node);
+        if (result.dispose) {
+          disposersRef.current.push(result.dispose);
+        }
       }
       chain.push(entry.ctx.destination);
 
@@ -161,6 +174,8 @@ export function FilteredAudioPlayer({
     return () => {
       nodesRef.current.forEach((node) => node.disconnect());
       nodesRef.current = [];
+      disposersRef.current.forEach((dispose) => dispose());
+      disposersRef.current = [];
     };
   }, [enabledFilters]);
 
@@ -169,6 +184,8 @@ export function FilteredAudioPlayer({
       sourceRef.current?.disconnect();
       nodesRef.current.forEach((node) => node.disconnect());
       nodesRef.current = [];
+      disposersRef.current.forEach((dispose) => dispose());
+      disposersRef.current = [];
       onPlaybackChange?.(false);
     };
   }, [onPlaybackChange]);

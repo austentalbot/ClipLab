@@ -4,9 +4,33 @@ import path from "path";
 import crypto from "crypto";
 import { addClip, listClips } from "@/lib/clips/store";
 import type { Clip } from "@/lib/clips/types";
-import type { FilterConfig } from "@/lib/audio/filter-registry";
+import {
+  type FilterConfig,
+  type FilterType,
+  filterRegistry,
+} from "@/lib/audio/filter-registry";
 
 const UPLOADS_DIR = path.join(process.cwd(), "public", "uploads");
+
+function validateFilters(filters: unknown[]): filters is FilterConfig[] {
+  for (const entry of filters) {
+    if (typeof entry !== "object" || entry === null) return false;
+    const f = entry as Record<string, unknown>;
+
+    if (typeof f.type !== "string") return false;
+    if (typeof f.enabled !== "boolean") return false;
+    if (typeof f.params !== "object" || f.params === null) return false;
+
+    const def = filterRegistry.find((d) => d.type === (f.type as FilterType));
+    if (!def) return false;
+
+    const params = f.params as Record<string, unknown>;
+    for (const key of Object.keys(def.paramRanges)) {
+      if (typeof params[key] !== "number") return false;
+    }
+  }
+  return true;
+}
 
 export async function GET() {
   try {
@@ -50,7 +74,13 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
-      filters = parsed as FilterConfig[];
+      if (!validateFilters(parsed)) {
+        return NextResponse.json(
+          { error: "Invalid filters payload" },
+          { status: 400 }
+        );
+      }
+      filters = parsed;
     } catch {
       return NextResponse.json(
         { error: "Invalid filters payload" },
