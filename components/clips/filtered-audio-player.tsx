@@ -9,13 +9,6 @@ import {
   type FilterNodeResult,
 } from "@/lib/audio/filter-registry";
 
-const mediaElementSourceStore = new WeakMap<
-  HTMLAudioElement,
-  {
-    ctx: AudioContext;
-    source: MediaElementAudioSourceNode;
-  }
->();
 const MEDIA_ELEMENT_SOURCE_KEY = Symbol.for(
   "cliplab.media-element-audio-source"
 );
@@ -34,19 +27,13 @@ function getStoredMediaElementEntry(
     }
   )[MEDIA_ELEMENT_SOURCE_KEY];
 
-  if (attached) {
-    mediaElementSourceStore.set(audio, attached);
-    return attached;
-  }
-
-  return mediaElementSourceStore.get(audio) ?? null;
+  return attached ?? null;
 }
 
 function storeMediaElementEntry(
   audio: HTMLAudioElement,
   entry: MediaElementSourceEntry
 ) {
-  mediaElementSourceStore.set(audio, entry);
   (
     audio as HTMLAudioElement & {
       [MEDIA_ELEMENT_SOURCE_KEY]?: MediaElementSourceEntry;
@@ -291,10 +278,9 @@ export function FilteredAudioPlayer({
     }
   }, [filters]);
 
-  // Unmount cleanup: disconnect nodes but preserve the WeakMap entry.
+  // Unmount cleanup: disconnect nodes but preserve the element-attached source entry.
   // A MediaElementSourceNode can only be created once per HTMLAudioElement,
-  // so the WeakMap entry must survive React StrictMode double-mounts.
-  // The entry (and its AudioContext) is garbage-collected with the element.
+  // so remounts must reuse the stored source/context pair for that element.
   useEffect(() => {
     return () => {
       sourceRef.current?.disconnect();

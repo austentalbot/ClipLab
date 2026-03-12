@@ -79,7 +79,7 @@ describe("FilteredPlayback", () => {
     expect(
       screen.queryByText("Play with saved filters")
     ).not.toBeInTheDocument();
-    // StrictMode double-mounts; the WeakMap ensures only one source is created
+    // StrictMode double-mounts; the player must reuse the existing media-element source
     expect(mockCreateMediaElementSource).toHaveBeenCalledTimes(1);
 
     fireEvent.play(player);
