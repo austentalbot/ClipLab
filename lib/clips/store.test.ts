@@ -29,6 +29,7 @@ const fs = jest.requireMock("fs/promises") as {
 function makeClip(overrides: Partial<Clip> = {}): Clip {
   return {
     id: "clip-1",
+    title: "My clip",
     filename: "clip-1.webm",
     durationMs: 5000,
     filters: [],

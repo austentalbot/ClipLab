@@ -1,19 +1,45 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { FilteredPlayback } from "./filtered-playback";
 
-const audioEngineState = {
-  isPlaying: false,
-  preview: jest.fn(),
-  stop: jest.fn(),
-  syncFilters: jest.fn(),
-  decodeBlob: jest.fn(),
-};
+const mockResume = jest.fn();
+const mockCreateMediaElementSource = jest.fn();
+const mockSourceConnect = jest.fn();
+const mockSourceDisconnect = jest.fn();
+const mockNodeConnect = jest.fn();
+const mockNodeDisconnect = jest.fn();
 
-jest.mock("@/lib/audio/use-audio-engine", () => ({
-  useAudioEngine: () => audioEngineState,
-}));
+class FakeAudioContext {
+  state: AudioContextState = "suspended";
+  destination = { kind: "destination" } as unknown as AudioDestinationNode;
+
+  createMediaElementSource() {
+    mockCreateMediaElementSource();
+    return {
+      connect: mockSourceConnect,
+      disconnect: mockSourceDisconnect,
+    } as unknown as MediaElementAudioSourceNode;
+  }
+
+  createGain() {
+    return {
+      gain: { value: 1 },
+      connect: mockNodeConnect,
+      disconnect: mockNodeDisconnect,
+    } as unknown as GainNode;
+  }
+
+  resume() {
+    this.state = "running";
+    mockResume();
+    return Promise.resolve();
+  }
+
+  close() {
+    return Promise.resolve();
+  }
+}
 
 describe("FilteredPlayback", () => {
   const filters = [
@@ -25,28 +51,84 @@ describe("FilteredPlayback", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    audioEngineState.isPlaying = false;
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      blob: async () => new Blob(["saved-audio"], { type: "audio/webm" }),
-    }) as jest.Mock;
+    global.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
   });
 
-  it("loads the saved audio file and previews it with the stored filters", async () => {
+  it("renders native audio controls and resumes the audio context on play", () => {
     render(
+      <StrictMode>
+        <FilteredPlayback filters={[...filters]} src="/uploads/test.webm" />
+      </StrictMode>
+    );
+
+    const player = screen.getByLabelText("Filtered playback");
+    expect(player).toHaveAttribute("src", "/uploads/test.webm");
+    expect(player).toHaveAttribute(
+      "controlsList",
+      expect.stringContaining("nodownload")
+    );
+    expect(
+      screen.queryByText("Play with saved filters")
+    ).not.toBeInTheDocument();
+    expect(mockCreateMediaElementSource).toHaveBeenCalledTimes(1);
+
+    fireEvent.play(player);
+
+    expect(mockResume).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips audio graph setup when no filters are enabled", () => {
+    render(
+      <FilteredPlayback
+        filters={filters.map((filter) => ({ ...filter, enabled: false }))}
+        src="/uploads/test.webm"
+      />
+    );
+
+    expect(screen.getByLabelText("Filtered playback")).toBeInTheDocument();
+    expect(mockCreateMediaElementSource).not.toHaveBeenCalled();
+  });
+
+  it("keeps a bypass connection when filters are turned off after graph setup", () => {
+    const { rerender } = render(
+      <FilteredPlayback filters={[...filters]} src="/uploads/test.webm" />
+    );
+
+    rerender(
+      <FilteredPlayback
+        filters={filters.map((filter) => ({ ...filter, enabled: false }))}
+        src="/uploads/test.webm"
+      />
+    );
+
+    expect(mockCreateMediaElementSource).toHaveBeenCalledTimes(1);
+    expect(mockSourceConnect).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "destination" })
+    );
+  });
+
+  it("resumes a new audio context when filters are enabled mid-playback", async () => {
+    const disabledFilters = filters.map((filter) => ({
+      ...filter,
+      enabled: false,
+    }));
+    const { rerender } = render(
+      <FilteredPlayback filters={disabledFilters} src="/uploads/test.webm" />
+    );
+
+    const player = screen.getByLabelText("Filtered playback");
+    Object.defineProperty(player, "paused", {
+      configurable: true,
+      get: () => false,
+    });
+
+    fireEvent.play(player);
+    rerender(
       <FilteredPlayback filters={[...filters]} src="/uploads/test.webm" />
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Play filtered clip")).toBeInTheDocument();
+      expect(mockResume).toHaveBeenCalledTimes(1);
     });
-
-    await userEvent.click(screen.getByText("Play filtered clip"));
-
-    await waitFor(() => {
-      expect(audioEngineState.preview).toHaveBeenCalledTimes(1);
-    });
-    expect(audioEngineState.preview.mock.calls[0][1]).toEqual(filters);
-    expect(global.fetch).toHaveBeenCalledWith("/uploads/test.webm");
   });
 });

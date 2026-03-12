@@ -40,8 +40,4 @@
     @apply min-h-screen bg-background text-foreground antialiased;
     font-family: var(--font-sans);
   }
-
-  ::selection {
-    background: hsla(var(--primary), 0.16);
-  }
 }

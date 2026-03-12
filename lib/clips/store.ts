@@ -28,24 +28,8 @@ export function getClipFileUrl(filename: string): string {
   return `/uploads/${encodeURIComponent(filename)}`;
 }
 
-export function formatClipDuration(durationMs: number): string {
-  const totalSeconds = Math.floor(durationMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-export function formatClipCreatedAt(createdAt: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(createdAt));
-}
-
 export async function listClips(): Promise<Clip[]> {
-  const clips = await readClips();
-  return sortClipsByCreatedAtDesc(clips);
+  return readClips();
 }
 
 export async function getClip(id: string): Promise<Clip | null> {

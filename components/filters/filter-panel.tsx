@@ -9,17 +9,19 @@ import {
 
 type FilterPanelProps = {
   filters: FilterConfig[];
+  disabled?: boolean;
   onToggle: (type: FilterType) => void;
   onParamChange: (type: FilterType, param: string, value: number) => void;
 };
 
 export function FilterPanel({
+  disabled = false,
   filters,
   onToggle,
   onParamChange,
 }: FilterPanelProps) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <p className="text-sm font-medium text-foreground">Filters</p>
       <div className="space-y-3">
         {filterRegistry.map((def) => {
@@ -31,6 +33,7 @@ export function FilterPanel({
               key={def.type}
               def={def}
               config={config}
+              disabled={disabled}
               onToggle={onToggle}
               onParamChange={onParamChange}
             />

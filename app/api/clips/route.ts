@@ -28,6 +28,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing audio file" }, { status: 400 });
   }
 
+  const titleRaw = formData.get("title");
+  const title = typeof titleRaw === "string" ? titleRaw.trim() : "";
+  if (!title) {
+    return NextResponse.json({ error: "Missing clip title" }, { status: 400 });
+  }
+
   const durationMs = Number(formData.get("durationMs"));
   if (!Number.isFinite(durationMs) || durationMs <= 0) {
     return NextResponse.json({ error: "Invalid durationMs" }, { status: 400 });
@@ -64,6 +70,7 @@ export async function POST(request: Request) {
 
     const clip: Clip = {
       id,
+      title,
       filename,
       durationMs,
       filters,

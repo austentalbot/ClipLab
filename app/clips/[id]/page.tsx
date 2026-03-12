@@ -1,19 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  formatClipCreatedAt,
-  formatClipDuration,
-  getClip,
-  getClipFileUrl,
-} from "@/lib/clips/store";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { filterRegistry } from "@/lib/audio/filter-registry";
+import { formatClipCreatedAt, formatClipDuration } from "@/lib/clips/format";
+import { getClip, getClipFileUrl } from "@/lib/clips/store";
 import { FilteredPlayback } from "./filtered-playback";
 
 type ClipDetailPageProps = {
@@ -22,6 +14,20 @@ type ClipDetailPageProps = {
   };
 };
 
+function formatFilterParams(
+  params: Record<string, number>,
+  type: string
+): string[] {
+  const def = filterRegistry.find((item) => item.type === type);
+
+  return Object.entries(params).map(([key, value]) => {
+    const range = def?.paramRanges[key];
+    const label = range?.label ?? key;
+    const unit = range?.unit ?? "";
+    return `${label}: ${value}${unit}`;
+  });
+}
+
 export default async function ClipDetailPage({ params }: ClipDetailPageProps) {
   const clip = await getClip(params.id);
 
@@ -29,81 +35,64 @@ export default async function ClipDetailPage({ params }: ClipDetailPageProps) {
     notFound();
   }
 
-  const activeFilters = clip.filters.filter((filter) => filter.enabled);
+  const activeFilters = clip.filters.filter((f) => f.enabled);
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-          Clip detail
+          {clip.title}
         </h1>
-        <p className="text-sm text-muted-foreground">{clip.id}</p>
+        <p className="text-sm text-muted-foreground">
+          {formatClipDuration(clip.durationMs)} ·{" "}
+          {formatClipCreatedAt(clip.createdAt)}
+        </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Saved recording</CardTitle>
-          <CardDescription>
-            Verify the saved file and metadata from local disk storage.
-          </CardDescription>
+          <CardTitle>Playback</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <dl className="grid gap-4 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="font-medium text-foreground">Created</dt>
-              <dd className="text-muted-foreground">
-                {formatClipCreatedAt(clip.createdAt)}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium text-foreground">Duration</dt>
-              <dd className="text-muted-foreground">
-                {formatClipDuration(clip.durationMs)}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium text-foreground">Filename</dt>
-              <dd className="break-all text-muted-foreground">
-                {clip.filename}
-              </dd>
-            </div>
-            <div>
-              <dt className="font-medium text-foreground">Saved path</dt>
-              <dd className="break-all text-muted-foreground">
-                {getClipFileUrl(clip.filename)}
-              </dd>
-            </div>
-          </dl>
+        <CardContent className="space-y-8">
+          <FilteredPlayback
+            filters={clip.filters}
+            src={getClipFileUrl(clip.filename)}
+          />
 
           <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">Playback</p>
-            <FilteredPlayback
-              filters={clip.filters}
-              src={getClipFileUrl(clip.filename)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-foreground">Filters</p>
+            <p className="text-sm font-medium text-foreground">
+              Applied filters
+            </p>
             {activeFilters.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No filters enabled.
+                No filters were saved for this clip.
               </p>
             ) : (
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                {activeFilters.map((filter) => (
-                  <li
-                    key={filter.type}
-                    className="rounded-xl border border-border bg-muted/40 px-3 py-2"
-                  >
-                    <span className="font-medium capitalize text-foreground">
-                      {filter.type}
-                    </span>{" "}
-                    {Object.entries(filter.params)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(", ")}
-                  </li>
-                ))}
+              <ul className="space-y-3">
+                {activeFilters.map((filter) => {
+                  const def = filterRegistry.find(
+                    (d) => d.type === filter.type
+                  );
+                  const label = def?.label ?? filter.type;
+                  const paramsList = formatFilterParams(
+                    filter.params,
+                    filter.type
+                  );
+
+                  return (
+                    <li
+                      key={filter.type}
+                      className="rounded-xl border border-border bg-muted/40 px-3 py-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">{label}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {paramsList.join(", ")}
+                      </p>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

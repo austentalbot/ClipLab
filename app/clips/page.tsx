@@ -1,20 +1,35 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  formatClipCreatedAt,
-  formatClipDuration,
-  listClips,
-} from "@/lib/clips/store";
+import { Card, CardContent } from "@/components/ui/card";
+import { ClipCard } from "@/components/clips/clip-card";
+import { getClips } from "@/lib/clips/api";
+import type { Clip } from "@/lib/clips/types";
 
-export default async function ClipsPage() {
-  const clips = await listClips();
+export default function ClipsPage() {
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchClips = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await getClips();
+      setClips(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load clips");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchClips();
+  }, [fetchClips]);
 
   return (
     <div className="space-y-6">
@@ -22,57 +37,50 @@ export default async function ClipsPage() {
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">
           Clips
         </h1>
-        <p className="text-sm text-muted-foreground">
-          Recent saved clips from local disk storage.
-        </p>
+        <p className="text-sm text-muted-foreground">Saved clips.</p>
       </div>
 
-      {clips.length === 0 ? (
+      {isLoading ? (
+        <div className="grid gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="py-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-5 w-12 animate-pulse rounded-full bg-muted" />
+                  <div className="h-5 w-16 animate-pulse rounded-full bg-muted" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : error ? (
         <Card>
-          <CardHeader>
-            <CardTitle>No clips yet</CardTitle>
-            <CardDescription>
-              Record and save a clip to verify local file persistence.
-            </CardDescription>
-          </CardHeader>
+          <CardContent className="py-6 text-center">
+            <p className="text-sm text-destructive">{error}</p>
+            <button
+              onClick={fetchClips}
+              className="mt-3 text-sm font-medium text-primary hover:underline"
+            >
+              Try again
+            </button>
+          </CardContent>
+        </Card>
+      ) : clips.length === 0 ? (
+        <Card>
+          <CardContent className="py-6 text-center">
+            <p className="text-sm text-muted-foreground">No clips yet.</p>
+            <Link
+              href="/"
+              className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
+            >
+              Record your first clip
+            </Link>
+          </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4">
           {clips.map((clip) => (
-            <Card key={clip.id}>
-              <CardHeader>
-                <CardTitle className="text-lg">{clip.id}</CardTitle>
-                <CardDescription>
-                  {formatClipCreatedAt(clip.createdAt)}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <dl className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
-                  <div>
-                    <dt className="font-medium text-foreground">Duration</dt>
-                    <dd>{formatClipDuration(clip.durationMs)}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium text-foreground">File</dt>
-                    <dd>{clip.filename}</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium text-foreground">Filters</dt>
-                    <dd>
-                      {clip.filters.filter((filter) => filter.enabled).length}{" "}
-                      active
-                    </dd>
-                  </div>
-                </dl>
-
-                <Link
-                  href={`/clips/${clip.id}`}
-                  className="text-sm font-medium text-primary hover:text-primary/80 hover:underline"
-                >
-                  Open clip
-                </Link>
-              </CardContent>
-            </Card>
+            <ClipCard key={clip.id} clip={clip} />
           ))}
         </div>
       )}
