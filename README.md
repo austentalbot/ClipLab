@@ -72,9 +72,9 @@ Chrome desktop. The app uses `MediaRecorder` and `AudioContext` APIs that have t
 
 If this project were to continue, natural next additions would be:
 
-- Additional filters (reverb, EQ)
-- Click-to-seek on waveform
+- Durable persistence backend (SQL/MongoDB for metadata + object/file storage for audio blobs)
+- Clip management (edit/delete)
 - Cross-browser support (Safari, Firefox)
-- Database persistence (SQLite or PostgreSQL)
+- Click-to-seek on waveform
+- Additional filters (reverb, EQ)
 - User accounts and sharing
-- Audio export with filters baked in
