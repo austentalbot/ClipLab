@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { SignalChain } from "@/components/filters/signal-chain";
-import { filterRegistry, type FilterConfig } from "@/lib/audio/filter-registry";
+import {
+  filterRegistry,
+  type FilterConfig,
+  type FilterNodeResult,
+} from "@/lib/audio/filter-registry";
 
 const mediaElementSourceStore = new WeakMap<
   HTMLAudioElement,
@@ -12,12 +16,61 @@ const mediaElementSourceStore = new WeakMap<
     source: MediaElementAudioSourceNode;
   }
 >();
+const MEDIA_ELEMENT_SOURCE_KEY = Symbol.for(
+  "cliplab.media-element-audio-source"
+);
+
+type MediaElementSourceEntry = {
+  ctx: AudioContext;
+  source: MediaElementAudioSourceNode;
+};
+
+function getStoredMediaElementEntry(
+  audio: HTMLAudioElement
+): MediaElementSourceEntry | null {
+  const attached = (
+    audio as HTMLAudioElement & {
+      [MEDIA_ELEMENT_SOURCE_KEY]?: MediaElementSourceEntry;
+    }
+  )[MEDIA_ELEMENT_SOURCE_KEY];
+
+  if (attached) {
+    mediaElementSourceStore.set(audio, attached);
+    return attached;
+  }
+
+  return mediaElementSourceStore.get(audio) ?? null;
+}
+
+function storeMediaElementEntry(
+  audio: HTMLAudioElement,
+  entry: MediaElementSourceEntry
+) {
+  mediaElementSourceStore.set(audio, entry);
+  (
+    audio as HTMLAudioElement & {
+      [MEDIA_ELEMENT_SOURCE_KEY]?: MediaElementSourceEntry;
+    }
+  )[MEDIA_ELEMENT_SOURCE_KEY] = entry;
+}
+
+async function resumeContextIfPlaying(
+  audio: HTMLAudioElement,
+  ctx: AudioContext
+) {
+  if (audio.paused || ctx.state !== "suspended") {
+    return;
+  }
+
+  await ctx.resume();
+}
 
 type FilteredAudioPlayerProps = {
   ariaLabel?: string;
   disabled?: boolean;
   filters: FilterConfig[];
   onPlaybackChange?: (isPlaying: boolean) => void;
+  onTimeUpdate?: (currentTime: number, duration: number) => void;
   src: string;
 };
 
@@ -26,6 +79,7 @@ export function FilteredAudioPlayer({
   disabled = false,
   filters,
   onPlaybackChange,
+  onTimeUpdate,
   src,
 }: FilteredAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -33,23 +87,31 @@ export function FilteredAudioPlayer({
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const nodesRef = useRef<AudioNode[]>([]);
   const disposersRef = useRef<(() => void)[]>([]);
+  const stopCallbacksRef = useRef<(() => void)[]>([]);
+  const playCallbacksRef = useRef<(() => void)[]>([]);
+  const nodeMapRef = useRef<Map<string, FilterNodeResult>>(new Map());
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const enabledFilters = useMemo(
-    () => filters.filter((filter) => filter.enabled),
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+  const onPlaybackChangeRef = useRef(onPlaybackChange);
+
+  // Stable string that only changes when the set of enabled filter types changes
+  const graphKey = useMemo(
+    () =>
+      filters
+        .filter((f) => f.enabled)
+        .map((f) => f.type)
+        .join(","),
     [filters]
   );
 
-  const resumeContextIfPlaying = async (
-    audio: HTMLAudioElement,
-    ctx: AudioContext
-  ) => {
-    if (audio.paused || ctx.state !== "suspended") {
-      return;
-    }
+  useEffect(() => {
+    onTimeUpdateRef.current = onTimeUpdate;
+  }, [onTimeUpdate]);
 
-    await ctx.resume();
-  };
+  useEffect(() => {
+    onPlaybackChangeRef.current = onPlaybackChange;
+  }, [onPlaybackChange]);
 
   useEffect(() => {
     onPlaybackChange?.(isPlaying);
@@ -67,24 +129,41 @@ export function FilteredAudioPlayer({
 
     const handlePlay = () => {
       setIsPlaying(true);
+      playCallbacksRef.current.forEach((cb) => cb());
       if (ctxRef.current?.state === "suspended") {
         void ctxRef.current.resume().catch(() => undefined);
       }
     };
-    const handlePause = () => setIsPlaying(false);
-    const handleEnded = () => setIsPlaying(false);
+    const handlePause = () => {
+      setIsPlaying(false);
+      stopCallbacksRef.current.forEach((cb) => cb());
+    };
+    const handleEnded = () => {
+      setIsPlaying(false);
+      stopCallbacksRef.current.forEach((cb) => cb());
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        onTimeUpdateRef.current?.(audio.duration, audio.duration);
+      }
+    };
     const handleError = () => setError("Audio file could not be loaded");
+    const handleTimeUpdate = () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        onTimeUpdateRef.current?.(audio.currentTime, audio.duration);
+      }
+    };
 
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
     audio.addEventListener("ended", handleEnded);
     audio.addEventListener("error", handleError);
+    audio.addEventListener("timeupdate", handleTimeUpdate);
 
     return () => {
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("ended", handleEnded);
       audio.removeEventListener("error", handleError);
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
     };
   }, []);
 
@@ -102,11 +181,12 @@ export function FilteredAudioPlayer({
     setIsPlaying(false);
   }, [disabled]);
 
+  // Graph-rebuild effect: only fires when the set of enabled filters changes
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const existingEntry = mediaElementSourceStore.get(audio) ?? null;
+    const existingEntry = getStoredMediaElementEntry(audio);
     const source = sourceRef.current;
     if (source) {
       source.disconnect();
@@ -115,7 +195,12 @@ export function FilteredAudioPlayer({
     nodesRef.current = [];
     disposersRef.current.forEach((dispose) => dispose());
     disposersRef.current = [];
+    stopCallbacksRef.current = [];
+    playCallbacksRef.current = [];
+    nodeMapRef.current.clear();
     setError(null);
+
+    const enabledFilters = filters.filter((f) => f.enabled);
 
     if (enabledFilters.length === 0) {
       if (existingEntry) {
@@ -139,7 +224,7 @@ export function FilteredAudioPlayer({
         const ctx = new AudioContext();
         const source = ctx.createMediaElementSource(audio);
         entry = { ctx, source };
-        mediaElementSourceStore.set(audio, entry);
+        storeMediaElementEntry(audio, entry);
       }
 
       ctxRef.current = entry.ctx;
@@ -150,10 +235,23 @@ export function FilteredAudioPlayer({
         const def = filterRegistry.find((item) => item.type === filter.type);
         if (!def) continue;
         const result = def.createNode(entry.ctx, filter.params);
+        nodeMapRef.current.set(filter.type, result);
+        // Connect previous → node (input), use output for next link
         chain.push(result.node);
-        nodesRef.current.push(result.node);
+        if (result.output) {
+          chain.push(result.output);
+          nodesRef.current.push(result.node, result.output);
+        } else {
+          nodesRef.current.push(result.node);
+        }
         if (result.dispose) {
           disposersRef.current.push(result.dispose);
+        }
+        if (result.onStop) {
+          stopCallbacksRef.current.push(result.onStop);
+        }
+        if (result.onPlay) {
+          playCallbacksRef.current.push(result.onPlay);
         }
       }
       chain.push(entry.ctx.destination);
@@ -171,14 +269,32 @@ export function FilteredAudioPlayer({
       );
     }
 
+    const nodeMap = nodeMapRef.current;
     return () => {
       nodesRef.current.forEach((node) => node.disconnect());
       nodesRef.current = [];
       disposersRef.current.forEach((dispose) => dispose());
       disposersRef.current = [];
+      stopCallbacksRef.current = [];
+      playCallbacksRef.current = [];
+      nodeMap.clear();
     };
-  }, [enabledFilters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphKey]);
 
+  // Param-update effect: updates AudioParam values in-place without rebuilding
+  useEffect(() => {
+    for (const filter of filters) {
+      if (!filter.enabled) continue;
+      const result = nodeMapRef.current.get(filter.type);
+      result?.update?.(filter.params);
+    }
+  }, [filters]);
+
+  // Unmount cleanup: disconnect nodes but preserve the WeakMap entry.
+  // A MediaElementSourceNode can only be created once per HTMLAudioElement,
+  // so the WeakMap entry must survive React StrictMode double-mounts.
+  // The entry (and its AudioContext) is garbage-collected with the element.
   useEffect(() => {
     return () => {
       sourceRef.current?.disconnect();
@@ -186,9 +302,11 @@ export function FilteredAudioPlayer({
       nodesRef.current = [];
       disposersRef.current.forEach((dispose) => dispose());
       disposersRef.current = [];
-      onPlaybackChange?.(false);
+      onPlaybackChangeRef.current?.(false);
+      ctxRef.current = null;
     };
-  }, [onPlaybackChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-3">

@@ -1,6 +1,6 @@
 # ClipLab
 
-ClipLab is a browser-based audio recording and processing tool built with Next.js. Record audio from your microphone, apply real-time filters (gain, low-pass, high-pass, delay), preview the result, and save clips with their filter configurations for non-destructive playback later.
+ClipLab is a browser-based audio recording and processing tool built with Next.js. Record audio from your microphone, apply real-time filters (gain, low-pass, high-pass, compressor, delay), preview the result with waveform visualization, and save clips with their filter configurations for non-destructive playback later.
 
 ## Setup
 
@@ -41,12 +41,16 @@ Playback:
 
 **Filter registry** (`lib/audio/filter-registry.ts`) is the single source of truth for available filters. It defines the UI controls, default values, parameter ranges, and Web Audio node creation for each filter type.
 
+**Signal chain:** gain → low-pass → high-pass → compressor → delay
+
 ## Storage Model
 
 - **Audio files:** `public/uploads/*.webm` — raw recordings stored as-is
 - **Metadata:** `data/clips.json` — clip titles, durations, filter configurations, timestamps
 
 Clips store the raw audio alongside the filter configuration, enabling non-destructive replay with different settings.
+
+**Note:** Storage is local-only. Filesystem persistence does not work on serverless platforms like Vercel, where the filesystem is ephemeral.
 
 ## Browser Target
 
@@ -56,16 +60,20 @@ Chrome desktop. The app uses `MediaRecorder` and `AudioContext` APIs that have t
 
 - Database persistence (filesystem + JSON is appropriate for a single-user tool)
 - User authentication
-- Waveform visualization
+- Object storage (S3, etc.)
+- Server-side audio processing
+- Exporting filtered audio
+- Tagging and search
+- Drag-and-drop filter reordering
+- Filter presets
 - Mobile / cross-browser support
-- Pre-processed audio export
 
 ## Next Steps
 
 If this project were to continue, natural next additions would be:
 
-- Waveform visualization during recording and playback
-- Additional filters (reverb, compressor, EQ)
+- Additional filters (reverb, EQ)
+- Click-to-seek on waveform
 - Cross-browser support (Safari, Firefox)
 - Database persistence (SQLite or PostgreSQL)
 - User accounts and sharing

@@ -1,6 +1,11 @@
 // ── Types ──────────────────────────────────────────────────────
 
-export type FilterType = "gain" | "lowpass" | "highpass" | "delay";
+export type FilterType =
+  | "gain"
+  | "lowpass"
+  | "highpass"
+  | "compressor"
+  | "delay";
 
 export type FilterConfig = {
   type: FilterType;
@@ -10,7 +15,13 @@ export type FilterConfig = {
 
 export type FilterNodeResult = {
   node: AudioNode;
+  /** When set, the chain connects from `output` instead of `node`. */
+  output?: AudioNode;
   dispose?: () => void;
+  onStop?: () => void;
+  onPlay?: () => void;
+  /** Update AudioParam values in-place without rebuilding the graph. */
+  update?: (params: Record<string, number>) => void;
 };
 
 export type FilterDef = {
@@ -57,7 +68,12 @@ export const filterRegistry: FilterDef[] = [
     createNode(ctx, params) {
       const node = ctx.createGain();
       node.gain.value = params.gain;
-      return { node };
+      return {
+        node,
+        update(p) {
+          node.gain.value = p.gain;
+        },
+      };
     },
   },
   {
@@ -90,7 +106,13 @@ export const filterRegistry: FilterDef[] = [
       node.type = "lowpass";
       node.frequency.value = params.frequency;
       node.Q.value = params.Q;
-      return { node };
+      return {
+        node,
+        update(p) {
+          node.frequency.value = p.frequency;
+          node.Q.value = p.Q;
+        },
+      };
     },
   },
   {
@@ -122,7 +144,50 @@ export const filterRegistry: FilterDef[] = [
       node.type = "highpass";
       node.frequency.value = params.frequency;
       node.Q.value = params.Q;
-      return { node };
+      return {
+        node,
+        update(p) {
+          node.frequency.value = p.frequency;
+          node.Q.value = p.Q;
+        },
+      };
+    },
+  },
+  {
+    type: "compressor",
+    label: "Compressor",
+    description: "Reduces the dynamic range by attenuating loud signals.",
+    defaultParams: { threshold: -24, ratio: 4 },
+    paramRanges: {
+      threshold: {
+        min: -50,
+        max: 0,
+        step: 1,
+        unit: "dB",
+        label: "Threshold",
+        description:
+          "The level above which compression begins. Lower values compress more of the signal.",
+      },
+      ratio: {
+        min: 1,
+        max: 20,
+        step: 0.5,
+        label: "Ratio",
+        description:
+          "How much the signal above the threshold is reduced. Higher values mean stronger compression.",
+      },
+    },
+    createNode(ctx, params) {
+      const node = ctx.createDynamicsCompressor();
+      node.threshold.value = params.threshold;
+      node.ratio.value = params.ratio;
+      return {
+        node,
+        update(p) {
+          node.threshold.value = p.threshold;
+          node.ratio.value = p.ratio;
+        },
+      };
     },
   },
   {
@@ -146,15 +211,33 @@ export const filterRegistry: FilterDef[] = [
       delay.delayTime.value = params.time;
 
       // Internal feedback loop: delay → feedbackGain → delay
+      const feedbackLevel = 0.3;
       const feedback = ctx.createGain();
-      feedback.gain.value = 0.3;
+      feedback.gain.value = feedbackLevel;
       delay.connect(feedback);
       feedback.connect(delay);
 
+      // Wet output gate: muted on stop to immediately silence the tail
+      const wet = ctx.createGain();
+      delay.connect(wet);
+
       return {
         node: delay,
+        output: wet,
         dispose() {
           feedback.disconnect();
+          wet.disconnect();
+        },
+        onStop() {
+          feedback.gain.value = 0;
+          wet.gain.value = 0;
+        },
+        onPlay() {
+          feedback.gain.value = feedbackLevel;
+          wet.gain.value = 1;
+        },
+        update(p) {
+          delay.delayTime.value = p.time;
         },
       };
     },

@@ -36,6 +36,10 @@ class FakeAudioContext {
     return Promise.resolve();
   }
 
+  decodeAudioData() {
+    return Promise.reject(new Error("Not supported in test"));
+  }
+
   close() {
     return Promise.resolve();
   }
@@ -46,6 +50,11 @@ describe("FilteredPlayback", () => {
     { type: "gain", enabled: true, params: { gain: 1.5 } },
     { type: "lowpass", enabled: false, params: { frequency: 1000, Q: 1 } },
     { type: "highpass", enabled: false, params: { frequency: 500, Q: 1 } },
+    {
+      type: "compressor",
+      enabled: false,
+      params: { threshold: -24, ratio: 4 },
+    },
     { type: "delay", enabled: false, params: { time: 0.3 } },
   ] as const;
 
@@ -70,11 +79,12 @@ describe("FilteredPlayback", () => {
     expect(
       screen.queryByText("Play with saved filters")
     ).not.toBeInTheDocument();
+    // StrictMode double-mounts; the WeakMap ensures only one source is created
     expect(mockCreateMediaElementSource).toHaveBeenCalledTimes(1);
 
     fireEvent.play(player);
 
-    expect(mockResume).toHaveBeenCalledTimes(1);
+    expect(mockResume).toHaveBeenCalled();
   });
 
   it("skips audio graph setup when no filters are enabled", () => {
@@ -104,6 +114,47 @@ describe("FilteredPlayback", () => {
     expect(mockCreateMediaElementSource).toHaveBeenCalledTimes(1);
     expect(mockSourceConnect).toHaveBeenLastCalledWith(
       expect.objectContaining({ kind: "destination" })
+    );
+  });
+
+  it("does not rebuild the graph when only filter params change", () => {
+    const { rerender } = render(
+      <FilteredPlayback filters={[...filters]} src="/uploads/test.webm" />
+    );
+
+    const callCountAfterMount = mockCreateMediaElementSource.mock.calls.length;
+
+    // Change only the gain param value, keep same enabled set
+    const updatedFilters = filters.map((f) => ({
+      ...f,
+      params: { ...f.params },
+    }));
+    (updatedFilters[0].params as Record<string, number>).gain = 2.5;
+
+    rerender(
+      <FilteredPlayback filters={updatedFilters} src="/uploads/test.webm" />
+    );
+
+    expect(mockCreateMediaElementSource.mock.calls.length).toBe(
+      callCountAfterMount
+    );
+  });
+
+  it("reuses the same media element source when the clip src changes", () => {
+    const { rerender } = render(
+      <FilteredPlayback filters={[...filters]} src="/uploads/first.webm" />
+    );
+
+    expect(mockCreateMediaElementSource).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <FilteredPlayback filters={[...filters]} src="/uploads/second.webm" />
+    );
+
+    expect(mockCreateMediaElementSource).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Filtered playback")).toHaveAttribute(
+      "src",
+      "/uploads/second.webm"
     );
   });
 

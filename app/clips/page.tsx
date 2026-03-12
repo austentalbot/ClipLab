@@ -37,7 +37,6 @@ export default function ClipsPage() {
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">
           Clips
         </h1>
-        <p className="text-sm text-muted-foreground">Saved clips.</p>
       </div>
 
       {isLoading ? (
