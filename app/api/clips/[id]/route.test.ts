@@ -18,6 +18,7 @@ describe("/api/clips/[id] route", () => {
   it("returns the requested clip", async () => {
     mockGetClip.mockResolvedValue({
       id: "clip-123",
+      title: "Playback draft",
       filename: "clip-123.webm",
       durationMs: 3200,
       filters: [],
@@ -31,6 +32,7 @@ describe("/api/clips/[id] route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       id: "clip-123",
+      title: "Playback draft",
       filename: "clip-123.webm",
       durationMs: 3200,
       filters: [],

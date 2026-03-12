@@ -1,15 +1,21 @@
 "use client";
 
-import { useReducer, useCallback, useEffect } from "react";
-import Link from "next/link";
+import {
+  useReducer,
+  useCallback,
+  useEffect,
+  useState,
+  type ChangeEvent,
+} from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { FilteredAudioPlayer } from "@/components/clips/filtered-audio-player";
 import { useRecorder } from "@/lib/audio/useRecorder";
-import { useAudioEngine } from "@/lib/audio/use-audio-engine";
 import { type FilterType } from "@/lib/audio/filter-registry";
 import { FilterPanel } from "@/components/filters/filter-panel";
-import { SignalChain } from "@/components/filters/signal-chain";
 import { uploadClip } from "@/lib/clips/api";
+import { createClipTitle } from "@/lib/clips/format";
 import { initialPageState, pageReducer } from "./record-page-state";
 
 function formatDuration(ms: number): string {
@@ -20,6 +26,7 @@ function formatDuration(ms: number): string {
 }
 
 export default function RecordPage() {
+  const router = useRouter();
   const {
     status: recorderStatus,
     durationMs,
@@ -31,21 +38,25 @@ export default function RecordPage() {
     reset,
   } = useRecorder();
 
-  const { isPlaying, preview, stop, syncFilters } = useAudioEngine();
   const [state, dispatch] = useReducer(pageReducer, initialPageState);
+  const [isPreviewing, setIsPreviewing] = useState(false);
 
   useEffect(() => {
     dispatch({
       type: "SYNC_RECORDER",
       recorderStatus,
-      isPlaying,
+      blobUrl,
+      isPlaying: isPreviewing,
       error,
     });
-  }, [error, isPlaying, recorderStatus]);
+  }, [blobUrl, error, isPreviewing, recorderStatus]);
 
-  useEffect(() => {
-    void syncFilters(state.filters);
-  }, [state.filters, syncFilters]);
+  const hasCapturedAudio =
+    (state.status === "recorded" ||
+      state.status === "previewing" ||
+      state.status === "uploading" ||
+      (state.status === "error" && Boolean(blobUrl))) &&
+    blobUrl;
 
   const handleToggle = useCallback((type: FilterType) => {
     dispatch({ type: "TOGGLE_FILTER", filterType: type });
@@ -58,52 +69,50 @@ export default function RecordPage() {
     []
   );
 
-  const handlePreview = useCallback(async () => {
-    if (!blob) return;
-    await preview(blob, state.filters);
-  }, [blob, state.filters, preview]);
-
   const handleSave = useCallback(async () => {
-    if (!blob) return;
+    if (!blob || state.status === "uploading") return;
+    const nextTitle = state.title.trim() || createClipTitle(new Date());
     dispatch({ type: "UPLOAD_START" });
     try {
-      const clip = await uploadClip(blob, durationMs, state.filters);
-      dispatch({ type: "UPLOAD_SUCCESS", clipId: clip.id });
+      const clip = await uploadClip(blob, nextTitle, durationMs, state.filters);
+      router.replace(`/clips/${clip.id}`);
     } catch (err) {
       dispatch({
         type: "UPLOAD_ERROR",
         error: err instanceof Error ? err.message : "Upload failed",
       });
     }
-  }, [blob, durationMs, state.filters]);
+  }, [blob, durationMs, router, state.filters, state.status, state.title]);
 
   const handleReset = useCallback(() => {
-    stop();
     dispatch({ type: "RESET_PAGE" });
     reset();
-  }, [reset, stop]);
+    setIsPreviewing(false);
+  }, [reset]);
+
+  const handleTitleChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      dispatch({ type: "SET_TITLE", title: event.target.value });
+    },
+    []
+  );
 
   const statusBadge = {
-    idle: { label: "Idle", variant: "outline" as const },
+    idle: { label: "Ready", variant: "outline" as const },
     "requesting-permission": {
-      label: "Awaiting Permission",
+      label: "Allow mic",
       variant: "outline" as const,
     },
     recording: { label: "Recording", variant: "destructive" as const },
     recorded: { label: "Recorded", variant: "secondary" as const },
     previewing: { label: "Previewing", variant: "default" as const },
-    uploading: { label: "Saving", variant: "secondary" as const },
-    uploaded: { label: "Saved", variant: "default" as const },
+    uploading: { label: "Saving clip", variant: "secondary" as const },
     error: { label: "Error", variant: "destructive" as const },
   }[state.status];
-
-  const hasCapturedAudio =
-    (state.status === "recorded" ||
-      state.status === "previewing" ||
-      state.status === "uploading" ||
-      state.status === "uploaded" ||
-      (state.status === "error" && Boolean(blobUrl))) &&
-    blobUrl;
+  const activeFiltersCount = state.filters.filter(
+    (filter) => filter.enabled
+  ).length;
+  const isSaving = state.status === "uploading";
 
   return (
     <div className="space-y-6">
@@ -112,49 +121,46 @@ export default function RecordPage() {
           Record
         </h1>
         <p className="text-sm text-muted-foreground">
-          Record audio, apply filters, and save clips.
+          Record, tune, and save a clip.
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle>Recording workspace</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Record, shape the signal chain, then preview the processed
-                result.
-              </p>
-            </div>
+            <CardTitle>Create a clip</CardTitle>
             <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {state.status === "idle" && (
             <button
               onClick={startRecording}
-              className="rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:opacity-90"
+              className="rounded-md bg-destructive px-5 py-2.5 text-sm font-medium text-destructive-foreground hover:opacity-90"
             >
-              Record
+              Start recording
             </button>
           )}
 
           {state.status === "requesting-permission" && (
             <p className="text-sm text-muted-foreground">
-              Requesting microphone access…
+              Allow microphone access.
             </p>
           )}
 
           {state.status === "recording" && (
-            <div className="flex items-center gap-4">
-              <button
-                onClick={stopRecording}
-                className="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:opacity-90"
-              >
-                Stop
-              </button>
-              <div className="flex items-center gap-2">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-destructive" />
+                <span>Recording now</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-4">
+                <button
+                  onClick={stopRecording}
+                  className="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:opacity-90"
+                >
+                  Stop recording
+                </button>
                 <span className="font-mono text-sm text-foreground">
                   {formatDuration(durationMs)}
                 </span>
@@ -163,90 +169,89 @@ export default function RecordPage() {
           )}
 
           {hasCapturedAudio && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>Recorded {formatDuration(durationMs)}</span>
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label
+                  htmlFor="clip-title"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Clip title
+                </label>
+                <input
+                  id="clip-title"
+                  type="text"
+                  value={state.title}
+                  onChange={handleTitleChange}
+                  disabled={isSaving}
+                  placeholder="Give this clip a short name"
+                  className="w-full rounded-xl border border-input bg-background px-4 py-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                />
               </div>
 
-              <SignalChain filters={state.filters} isPlaying={isPlaying} />
+              <section className="space-y-4 rounded-3xl border border-border bg-muted/30 p-4">
+                <p className="text-sm text-muted-foreground">
+                  {formatDuration(durationMs)} ·{" "}
+                  {activeFiltersCount === 0
+                    ? "No filters on"
+                    : `${activeFiltersCount} filter${
+                        activeFiltersCount === 1 ? "" : "s"
+                      } on`}
+                </p>
 
-              <section className="space-y-3" aria-label="Filter controls">
-                <FilterPanel
+                <FilteredAudioPlayer
+                  ariaLabel="Clip preview"
+                  disabled={isSaving}
                   filters={state.filters}
-                  onToggle={handleToggle}
-                  onParamChange={handleParamChange}
+                  onPlaybackChange={setIsPreviewing}
+                  src={blobUrl}
                 />
-              </section>
 
-              <section className="space-y-3" aria-label="Playback controls">
-                <div className="flex items-center gap-2">
-                  {isPlaying ? (
-                    <button
-                      onClick={stop}
-                      className="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:opacity-90"
-                    >
-                      Stop Preview
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handlePreview}
-                      className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
-                    >
-                      Preview
-                    </button>
-                  )}
+                <div className="flex flex-wrap items-center gap-2">
                   {state.status === "uploading" ? (
                     <button
                       disabled
                       className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground opacity-60"
                     >
-                      Saving…
+                      Saving clip...
                     </button>
-                  ) : state.status !== "uploaded" ? (
+                  ) : (
                     <button
                       onClick={handleSave}
-                      className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+                      disabled={isSaving}
+                      className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Save Clip
+                      Save clip
                     </button>
-                  ) : null}
+                  )}
                   <button
                     onClick={handleReset}
-                    className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
+                    disabled={isSaving}
+                    className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Reset
+                    Start over
                   </button>
                 </div>
 
-                {state.status === "uploaded" && state.clipId && (
-                  <p className="text-sm text-primary">
-                    Clip saved!{" "}
-                    <Link
-                      href={`/clips/${state.clipId}`}
-                      className="underline hover:opacity-80"
-                    >
-                      View clip
-                    </Link>
-                  </p>
-                )}
+                {state.status === "error" && state.error ? (
+                  <p className="text-sm text-destructive">{state.error}</p>
+                ) : null}
+              </section>
 
-                <audio controls src={blobUrl} className="w-full" />
+              <section className="space-y-3" aria-label="Filter controls">
+                <FilterPanel
+                  filters={state.filters}
+                  disabled={isSaving}
+                  onToggle={handleToggle}
+                  onParamChange={handleParamChange}
+                />
               </section>
             </div>
           )}
 
-          {state.status === "error" && (
+          {state.status === "error" && !hasCapturedAudio && (
             <div className="space-y-3">
               <p className="text-sm text-destructive">{state.error}</p>
               <div className="flex items-center gap-2">
-                {blob && (
-                  <button
-                    onClick={handleSave}
-                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-                  >
-                    Retry
-                  </button>
-                )}
                 <button
                   onClick={handleReset}
                   className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"

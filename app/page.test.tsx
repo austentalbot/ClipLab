@@ -1,7 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { RecorderStatus } from "./record-page-state";
 import RecordPage from "./page";
+
+const mockReplace = jest.fn();
 
 const recorderState = {
   status: "idle" as RecorderStatus,
@@ -14,19 +16,12 @@ const recorderState = {
   reset: jest.fn(),
 };
 
-const audioEngineState = {
-  isPlaying: false,
-  preview: jest.fn(),
-  stop: jest.fn(),
-  syncFilters: jest.fn().mockResolvedValue(undefined),
-};
-
 jest.mock("@/lib/audio/useRecorder", () => ({
   useRecorder: () => recorderState,
 }));
 
-jest.mock("@/lib/audio/use-audio-engine", () => ({
-  useAudioEngine: () => audioEngineState,
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: mockReplace }),
 }));
 
 const mockUploadClip = jest.fn();
@@ -49,7 +44,6 @@ describe("RecordPage", () => {
     recorderState.blobUrl = null;
     recorderState.blob = null;
     recorderState.error = null;
-    audioEngineState.isPlaying = false;
     mockUploadClip.mockReset();
   });
 
@@ -58,76 +52,125 @@ describe("RecordPage", () => {
 
     render(<RecordPage />);
 
-    expect(screen.getByText("Awaiting Permission")).toBeInTheDocument();
-    expect(
-      screen.getByText("Requesting microphone access…")
-    ).toBeInTheDocument();
+    expect(screen.getByText("Allow mic")).toBeInTheDocument();
+    expect(screen.getByText("Allow microphone access.")).toBeInTheDocument();
     expect(screen.queryByText("Recording")).not.toBeInTheDocument();
   });
 
-  it("shows previewing state and recorded sections while preview is active", () => {
+  it("shows previewing state while the preview player is active", () => {
     setRecorded();
-    audioEngineState.isPlaying = true;
 
     render(<RecordPage />);
+
+    const player = screen.getByLabelText("Clip preview");
+    fireEvent.play(player);
 
     expect(screen.getByText("Previewing")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter controls")).toBeInTheDocument();
-    expect(screen.getByLabelText("Playback controls")).toBeInTheDocument();
-    expect(screen.getByText("Stop Preview")).toBeInTheDocument();
+    expect(player).toBeInTheDocument();
   });
 
-  it("shows Save Clip button in recorded state", () => {
+  it("shows title input and save action in recorded state", async () => {
     setRecorded();
     render(<RecordPage />);
-    expect(screen.getByText("Save Clip")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/Clip from/)).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText("Clip title")).toBeInTheDocument();
+    expect(screen.getByText("Save clip")).toBeInTheDocument();
   });
 
-  it("shows loading state while uploading", async () => {
+  it("keeps an edited title across preview-state rerenders", async () => {
     setRecorded();
-    // Never resolves during the test
-    mockUploadClip.mockReturnValue(new Promise(() => {}));
     render(<RecordPage />);
 
-    await userEvent.click(screen.getByText("Save Clip"));
+    const titleInput = await screen.findByLabelText("Clip title");
+    await waitFor(() => {
+      expect((titleInput as HTMLInputElement).value).toMatch(/Clip from/);
+    });
 
-    expect(screen.getByText("Saving…")).toBeInTheDocument();
-    expect(screen.getByText("Saving…")).toBeDisabled();
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Morning memo");
+
+    fireEvent.play(screen.getByLabelText("Clip preview"));
+
+    expect(screen.getByLabelText("Clip title")).toHaveValue("Morning memo");
   });
 
-  it("shows success message and link after upload", async () => {
+  it("shows loading state while uploading and only navigates after success", async () => {
+    setRecorded();
+    let resolveUpload: ((value: { id: string }) => void) | undefined;
+    mockUploadClip.mockReturnValue(
+      new Promise<{ id: string }>((resolve) => {
+        resolveUpload = resolve;
+      })
+    );
+    render(<RecordPage />);
+
+    const titleInput = await screen.findByLabelText("Clip title");
+    const player = screen.getByLabelText("Clip preview");
+    const startOverButton = screen.getByText("Start over");
+    await userEvent.click(screen.getByText("Save clip"));
+
+    expect(screen.getByText("Saving clip...")).toBeInTheDocument();
+    expect(screen.getByText("Saving clip...")).toBeDisabled();
+    expect(titleInput).toBeDisabled();
+    expect(startOverButton).toBeDisabled();
+    expect(player).toHaveClass("pointer-events-none");
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    resolveUpload?.({ id: "abc-123" });
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith("/clips/abc-123");
+    });
+  });
+
+  it("submits the chosen title and shows success state after upload", async () => {
     setRecorded();
     mockUploadClip.mockResolvedValue({ id: "abc-123" });
     render(<RecordPage />);
 
-    await userEvent.click(screen.getByText("Save Clip"));
+    const titleInput = await screen.findByLabelText("Clip title");
+    await waitFor(() => {
+      expect((titleInput as HTMLInputElement).value).toMatch(/Clip from/);
+    });
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, "Morning memo");
+    await userEvent.click(screen.getByText("Save clip"));
 
     await waitFor(() => {
-      expect(screen.getByText("Clip saved!")).toBeInTheDocument();
+      expect(mockReplace).toHaveBeenCalledWith("/clips/abc-123");
     });
-    const link = screen.getByText("View clip");
-    expect(link).toHaveAttribute("href", "/clips/abc-123");
+    expect(mockUploadClip).toHaveBeenCalledWith(
+      expect.any(Blob),
+      "Morning memo",
+      3000,
+      expect.any(Array)
+    );
+    expect(screen.queryByText("Saved to your clips.")).not.toBeInTheDocument();
   });
 
-  it("shows error and retry on upload failure", async () => {
+  it("shows upload errors inline and lets the user try saving again", async () => {
     setRecorded();
     mockUploadClip
       .mockRejectedValueOnce(new Error("Network error"))
       .mockResolvedValueOnce({ id: "retry-123" });
     render(<RecordPage />);
 
-    await userEvent.click(screen.getByText("Save Clip"));
+    await userEvent.click(screen.getByText("Save clip"));
 
     await waitFor(() => {
       expect(screen.getByText("Network error")).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("Playback controls")).toBeInTheDocument();
-    expect(screen.getByText("Retry")).toBeInTheDocument();
+    expect(screen.getByLabelText("Clip preview")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("Retry"));
+    await userEvent.click(screen.getByText("Save clip"));
 
     await waitFor(() => {
-      expect(screen.getByText("Clip saved!")).toBeInTheDocument();
+      expect(mockReplace).toHaveBeenCalledWith("/clips/retry-123");
     });
   });
 });

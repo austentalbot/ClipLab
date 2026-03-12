@@ -39,6 +39,7 @@ describe("/api/clips route", () => {
   it("returns 400 for malformed filters metadata", async () => {
     const formData = new FormData();
     formData.append("file", new Blob(["audio"], { type: "audio/webm" }));
+    formData.append("title", "My clip");
     formData.append("durationMs", "3000");
     formData.append("filters", "{bad-json");
 
@@ -61,6 +62,7 @@ describe("/api/clips route", () => {
 
     const formData = new FormData();
     formData.append("file", new Blob(["audio"], { type: "audio/webm" }));
+    formData.append("title", "My clip");
     formData.append("durationMs", "3000");
     formData.append("filters", "[]");
 
@@ -84,6 +86,7 @@ describe("/api/clips route", () => {
     mockListClips.mockResolvedValue([
       {
         id: "clip-2",
+        title: "Second clip",
         filename: "clip-2.webm",
         durationMs: 2000,
         filters: [],
@@ -91,6 +94,7 @@ describe("/api/clips route", () => {
       },
       {
         id: "clip-1",
+        title: "First clip",
         filename: "clip-1.webm",
         durationMs: 1000,
         filters: [],
@@ -103,6 +107,7 @@ describe("/api/clips route", () => {
     await expect(response.json()).resolves.toEqual([
       {
         id: "clip-2",
+        title: "Second clip",
         filename: "clip-2.webm",
         durationMs: 2000,
         filters: [],
@@ -110,6 +115,7 @@ describe("/api/clips route", () => {
       },
       {
         id: "clip-1",
+        title: "First clip",
         filename: "clip-1.webm",
         durationMs: 1000,
         filters: [],
@@ -117,5 +123,23 @@ describe("/api/clips route", () => {
       },
     ]);
     expect(response.status).toBe(200);
+  });
+
+  it("returns 400 when title is missing", async () => {
+    const formData = new FormData();
+    formData.append("file", new Blob(["audio"], { type: "audio/webm" }));
+    formData.append("durationMs", "3000");
+    formData.append("filters", "[]");
+
+    const request = {
+      formData: async () => formData,
+    } as Request;
+
+    const response = await POST(request);
+
+    await expect(response.json()).resolves.toEqual({
+      error: "Missing clip title",
+    });
+    expect(response.status).toBe(400);
   });
 });

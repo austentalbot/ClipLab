@@ -3,11 +3,13 @@ import type { Clip } from "./types";
 
 export async function uploadClip(
   blob: Blob,
+  title: string,
   durationMs: number,
   filters: FilterConfig[]
 ): Promise<Clip> {
   const form = new FormData();
   form.append("file", blob, "recording.webm");
+  form.append("title", title);
   form.append("durationMs", String(durationMs));
   form.append("filters", JSON.stringify(filters));
 
@@ -21,4 +23,10 @@ export async function uploadClip(
   }
 
   return res.json() as Promise<Clip>;
+}
+
+export async function getClips(): Promise<Clip[]> {
+  const res = await fetch("/api/clips");
+  if (!res.ok) throw new Error("Failed to load clips");
+  return res.json();
 }
