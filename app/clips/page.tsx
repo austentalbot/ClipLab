@@ -69,7 +69,7 @@ export default function ClipsPage() {
           <CardContent className="py-6 text-center">
             <p className="text-sm text-muted-foreground">No clips yet.</p>
             <Link
-              href="/"
+              href="/record"
               className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
             >
               Record your first clip

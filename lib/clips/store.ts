@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import type { Clip } from "./types";
+import { getClipFileUrl } from "./urls";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const CLIPS_FILE = path.join(DATA_DIR, "clips.json");
@@ -24,10 +25,6 @@ export async function readClips(): Promise<Clip[]> {
   }
 }
 
-export function getClipFileUrl(filename: string): string {
-  return `/uploads/${encodeURIComponent(filename)}`;
-}
-
 export async function getClip(id: string): Promise<Clip | null> {
   const clips = await readClips();
   return clips.find((c) => c.id === id) ?? null;
@@ -46,3 +43,5 @@ export async function addClip(clip: Clip): Promise<void> {
   clips.unshift(clip);
   await writeClips(clips);
 }
+
+export { getClipFileUrl };
