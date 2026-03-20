@@ -54,8 +54,10 @@ async function resumeContextIfPlaying(
 
 type FilteredAudioPlayerProps = {
   ariaLabel?: string;
+  autoPlay?: boolean;
   disabled?: boolean;
   filters: FilterConfig[];
+  onEnded?: () => void;
   onPlaybackChange?: (isPlaying: boolean) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   src: string;
@@ -63,8 +65,10 @@ type FilteredAudioPlayerProps = {
 
 export function FilteredAudioPlayer({
   ariaLabel = "Filtered playback",
+  autoPlay = false,
   disabled = false,
   filters,
+  onEnded,
   onPlaybackChange,
   onTimeUpdate,
   src,
@@ -79,6 +83,7 @@ export function FilteredAudioPlayer({
   const nodeMapRef = useRef<Map<string, FilterNodeResult>>(new Map());
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const onEndedRef = useRef(onEnded);
   const onTimeUpdateRef = useRef(onTimeUpdate);
   const onPlaybackChangeRef = useRef(onPlaybackChange);
 
@@ -91,6 +96,10 @@ export function FilteredAudioPlayer({
         .join(","),
     [filters]
   );
+
+  useEffect(() => {
+    onEndedRef.current = onEnded;
+  }, [onEnded]);
 
   useEffect(() => {
     onTimeUpdateRef.current = onTimeUpdate;
@@ -131,6 +140,7 @@ export function FilteredAudioPlayer({
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
         onTimeUpdateRef.current?.(audio.duration, audio.duration);
       }
+      onEndedRef.current?.();
     };
     const handleError = () => setError("Audio file could not be loaded");
     const handleTimeUpdate = () => {
@@ -167,6 +177,19 @@ export function FilteredAudioPlayer({
     audio.pause();
     setIsPlaying(false);
   }, [disabled]);
+
+  useEffect(() => {
+    if (!autoPlay || disabled) {
+      return;
+    }
+
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    void audio.play().catch(() => undefined);
+  }, [autoPlay, disabled, src]);
 
   // Graph-rebuild effect: only fires when the set of enabled filters changes
   useEffect(() => {

@@ -19,7 +19,7 @@ export default function RootLayout({
       <body>
         <div className="mx-auto min-h-screen max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <header className="mb-8 flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-center sm:justify-between">
-            <Link href="/" className="flex items-center gap-3">
+            <Link href="/soundboards" className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-sm font-semibold text-primary-foreground">
                 CL
               </div>

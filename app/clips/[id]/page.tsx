@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { filterRegistry } from "@/lib/audio/filter-registry";
 import { formatClipCreatedAt, formatClipDuration } from "@/lib/clips/format";
-import { getClip, getClipFileUrl } from "@/lib/clips/store";
+import { getClip } from "@/lib/clips/store";
+import { getClipFileUrl } from "@/lib/clips/urls";
 import { FilteredPlayback } from "./filtered-playback";
 
 type ClipDetailPageProps = {
